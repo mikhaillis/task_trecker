@@ -1,0 +1,26 @@
+
+
+services:
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: task_tracker
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      # Обрати внимание на хост: вместо 127.0.0.1 теперь написано db
+      SQLALCHEMY_DATABASE_URL: postgresql+asyncpg://postgres:admin@db:5432/task_tracker
+
+volumes:
+  pg_data:
