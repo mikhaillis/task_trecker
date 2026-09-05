@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.database import SessionLocal
+from app.db.database import get_db
 from app.db import models
 from app.api.auth import get_current_user
 
@@ -27,13 +28,6 @@ def map_task_to_response(task: models.Task) -> TaskResponse:
         description=task.description,
         is_completed=task.is_completed
     )
-
-async def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        await db.close()
 
 @router.post("/", response_model=TaskResponse, status_code=201)
 async def create_task(

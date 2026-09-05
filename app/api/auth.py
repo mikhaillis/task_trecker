@@ -6,7 +6,7 @@ from sqlalchemy import select
 import jwt
 
 from app.db import models
-from app.api.tasks import get_db
+from app.db.database import get_db
 from app.security import (
     get_password_hash, 
     verify_password, 

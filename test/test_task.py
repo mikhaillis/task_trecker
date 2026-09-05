@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 
 from main import app
 from app.db import models
-from app.api.tasks import get_db
+from app.db.database import get_db
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
