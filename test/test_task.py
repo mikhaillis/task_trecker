@@ -1,10 +1,10 @@
 import pytest
-from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from main import app
 from app.db import models
 from app.api.tasks import get_db
 import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
@@ -27,7 +27,7 @@ async def prepare_database():
 
 @pytest.mark.asyncio
 async def test_create_task():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post("/tasks/", json={
             "title": "тест", 
             "description": "тест"
@@ -41,7 +41,7 @@ async def test_create_task():
 
 @pytest.mark.asyncio
 async def test_patch_task():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post("/tasks/", json={
             "title": "тест", 
             "description": "тест"
@@ -59,7 +59,7 @@ async def test_patch_task():
 
 @pytest.mark.asyncio
 async def test_get_tasks():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         completed_task = await ac.post("/tasks/", json={
             "title": "тест1", 
             "description": "тест1"
@@ -111,7 +111,7 @@ async def test_get_tasks():
 
 @pytest.mark.asyncio
 async def test_delete_task():
-        async with AsyncClient(app=app, base_url="http://test") as ac:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             to_delete = await ac.post("/tasks/", json={
             "title": "тест", 
             "description": "тест"
