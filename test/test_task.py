@@ -1,10 +1,11 @@
 import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
 from main import app
 from app.db import models
 from app.api.tasks import get_db
-import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
@@ -24,110 +25,112 @@ async def prepare_database():
     async with test_engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.drop_all)
 
-
-@pytest.mark.asyncio
-async def test_create_task():
+# Новая фикстура: создает клиента с уже вшитым токеном авторизации
+@pytest_asyncio.fixture
+async def auth_client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.post("/tasks/", json={
-            "title": "тест", 
-            "description": "тест"
+        # 1. Регистрируем пользователя
+        await ac.post("/auth/register", json={
+            "email": "test@tbank.ru",
+            "password": "strongpassword"
         })
+        
+        # 2. Логинимся. Обрати внимание: OAuth2 ожидает form-data (data=...), а не json
+        login_response = await ac.post("/auth/login", data={
+            "username": "test@tbank.ru",
+            "password": "strongpassword"
+        })
+        
+        token = login_response.json()["access_token"]
+        
+        # 3. Встраиваем токен в заголовки клиента на постоянной основе
+        ac.headers.update({"Authorization": f"Bearer {token}"})
+        
+        yield ac  # Передаем готового клиента в тесты
 
-        assert response.status_code == 201
-        data = response.json()
-        assert data["title"] == "тест"
-        assert data["description"] == "тест"
-        assert "id" in data
+# Теперь тесты принимают auth_client вместо ручного создания AsyncClient
+@pytest.mark.asyncio
+async def test_create_task(auth_client: AsyncClient):
+    response = await auth_client.post("/tasks/", json={
+        "title": "тест", 
+        "description": "тест"
+    })
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "тест"
+    assert data["description"] == "тест"
+    assert "id" in data
 
 @pytest.mark.asyncio
-async def test_patch_task():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.post("/tasks/", json={
-            "title": "тест", 
-            "description": "тест"
-        })
+async def test_patch_task(auth_client: AsyncClient):
+    response = await auth_client.post("/tasks/", json={
+        "title": "тест", 
+        "description": "тест"
+    })
+    assert response.status_code == 201
 
-        assert response.status_code == 201
+    data = response.json()
+    index = data["id"]
 
-        data = response.json()
-        index = data["id"]
+    patch = await auth_client.patch(f"/tasks/{index}/complete")
 
-        patch = await ac.patch(f"/tasks/{index}/complete")
-
-        assert patch.status_code == 200
-        assert patch.json()["is_completed"] == True
+    assert patch.status_code == 200
+    assert patch.json()["is_completed"] == True
 
 @pytest.mark.asyncio
-async def test_get_tasks():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        completed_task = await ac.post("/tasks/", json={
-            "title": "тест1", 
-            "description": "тест1"
-        })
-        assert completed_task.status_code == 201
+async def test_get_tasks(auth_client: AsyncClient):
+    completed_task = await auth_client.post("/tasks/", json={
+        "title": "тест1", 
+        "description": "тест1"
+    })
+    assert completed_task.status_code == 201
+    index_of_completed = completed_task.json()["id"]
 
-        index_of_completed = completed_task.json()["id"]
+    patch = await auth_client.patch(f"/tasks/{index_of_completed}/complete")
+    assert patch.status_code == 200
 
-        patch = await ac.patch(f"/tasks/{index_of_completed}/complete")
-        assert patch.status_code == 200
+    uncompleted_task = await auth_client.post("/tasks/", json={
+        "title": "тест2", 
+        "description": "тест2"
+    })
+    assert uncompleted_task.status_code == 201
 
-        uncompleted_task = await ac.post("/tasks/", json={
-            "title": "тест2", 
-            "description": "тест2"
-        })
-        assert uncompleted_task.status_code == 201
+    get_completed = await auth_client.get("/tasks/?is_complete=true")
+    assert get_completed.status_code == 200
+    assert isinstance(get_completed.json(), list)
+    assert len(get_completed.json()) == 1
 
+    info_completed = get_completed.json()[0]
+    assert info_completed["title"] == "тест1"
+    assert info_completed["is_completed"] == True
 
-        get_completed = await ac.get("/tasks/?is_complete=true")
-        assert get_completed.status_code == 200
-        assert isinstance(get_completed.json(), list)
-        assert len(get_completed.json()) == 1
+    get_uncompleted = await auth_client.get("/tasks/?is_complete=false")
+    assert get_uncompleted.status_code == 200
+    assert len(get_uncompleted.json()) == 1
 
-        info_completed = get_completed.json()[0]
+    info_uncompleted = get_uncompleted.json()[0]
+    assert info_uncompleted["title"] == "тест2"
+    assert info_uncompleted["is_completed"] == False
 
-        assert info_completed["title"] == "тест1"
-        assert info_completed["description"] == "тест1"
-        assert info_completed["is_completed"] == True
-
-
-        get_uncompleted = await ac.get("/tasks/?is_complete=false")
-        assert get_uncompleted.status_code == 200
-        assert isinstance(get_uncompleted.json(), list)
-        assert len(get_uncompleted.json()) == 1
-
-        info_uncompleted = get_uncompleted.json()[0]
-
-        assert info_uncompleted["title"] == "тест2"
-        assert info_uncompleted["description"] == "тест2"
-        assert info_uncompleted["is_completed"] == False
-
-
-        get_all = await ac.get("/tasks/")
-        assert get_all.status_code == 200
-        assert isinstance(get_all.json(), list)
-        assert len(get_all.json()) == 2
-
-
+    get_all = await auth_client.get("/tasks/")
+    assert get_all.status_code == 200
+    assert len(get_all.json()) == 2
 
 @pytest.mark.asyncio
-async def test_delete_task():
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            to_delete = await ac.post("/tasks/", json={
-            "title": "тест", 
-            "description": "тест"
-            })
+async def test_delete_task(auth_client: AsyncClient):
+    to_delete = await auth_client.post("/tasks/", json={
+        "title": "тест", 
+        "description": "тест"
+    })
+    index = to_delete.json()["id"]
+    
+    response = await auth_client.delete(f"/tasks/{index}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["detail"] == "успешно удалено"
 
-            index = to_delete.json()["id"]
-            
-            response = await ac.delete(f"/tasks/{index}")
-
-            assert response.status_code == 200
-
-            data = response.json()
-            assert data["detail"] == "успешно удалено"
-
-            response = await ac.delete(f"/tasks/{index}")
-
-            assert response.status_code == 404
-            data = response.json()
-            assert data["detail"] == "Задача не найдена"
+    response = await auth_client.delete(f"/tasks/{index}")
+    assert response.status_code == 404
+    data = response.json()
+    assert data["detail"] == "Задача не найдена"
