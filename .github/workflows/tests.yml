@@ -25,6 +25,6 @@ jobs:
         pip install pytest pytest-asyncio httpx aiosqlite
 
     - name: Run Pytest
-      run: pytest -v
+      run: PYTHONPATH=. pytest -v
 
 
